@@ -16,10 +16,32 @@ import {
   updateItem,
 } from './storage'
 
-const APP_NAME = import.meta.env.VITE_APP_NAME || 'Remember You'
+const APP_NAME = import.meta.env.VITE_APP_NAME || '我想记住你的事'
+
+const spaces = [
+  {
+    value: 'mine',
+    label: '我的部分',
+    short: '我',
+    description: '我答应过的事、我要主动做的事、需要提醒自己的事。',
+  },
+  {
+    value: 'hers',
+    label: '她的部分',
+    short: '她',
+    description: '她想要的小东西、她需要我出现的时候、她希望被我记住的事。',
+  },
+  {
+    value: 'shared',
+    label: '共同区',
+    short: '我们',
+    description: '一起做的事、共同约定、相处规则和慢慢靠近的计划。',
+  },
+]
 
 const categories = ['想一起做', '重要日子', '礼物灵感', '需要聊聊', '生活待办']
-const statuses = ['新想法', '待确认', '本周行动', '已完成', '先搁置']
+const statuses = ['已记下', '待确认', '这周处理', '已完成', '暂时做不到']
+const defaultSpace = 'shared'
 
 function formatDate(value) {
   if (!value) return ''
@@ -29,6 +51,10 @@ function formatDate(value) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value))
+}
+
+function getSpace(value) {
+  return spaces.find((space) => space.value === value) || spaces.find((space) => space.value === defaultSpace)
 }
 
 function statusClass(status) {
@@ -43,13 +69,13 @@ function App() {
     getSession().then(setSession).finally(() => setAuthLoading(false))
   }, [])
 
-  if (authLoading) return <Shell><p className="muted">正在打开记忆本...</p></Shell>
+  if (authLoading) return <Shell><p className="muted">正在打开这个小本本...</p></Shell>
 
   if (!session && hasSupabaseConfig) {
     return <AuthScreen onAuthed={(nextSession) => setSession(nextSession)} />
   }
 
-  return <Notebook session={session} onLogout={() => signOut().then(() => setSession(null))} />
+  return <Notebook onLogout={() => signOut().then(() => setSession(null))} />
 }
 
 function Shell({ children }) {
@@ -84,9 +110,9 @@ function AuthScreen({ onAuthed }) {
   return (
     <Shell>
       <section className="hero auth-hero">
-        <div className="eyebrow">两个人的轻量记忆本</div>
+        <div className="eyebrow">两个人的小本本</div>
         <h1>{APP_NAME}</h1>
-        <p>记录想一起做的事、重要日期、礼物灵感和需要慢慢聊清楚的小事。</p>
+        <p>有些话不用反复提醒，也不会被弄丢。我们把重要的小事放在这里，慢慢做，不靠猜，也不靠闹。</p>
       </section>
       <form className="card form" onSubmit={submit}>
         <div className="segmented">
@@ -108,8 +134,8 @@ function AuthScreen({ onAuthed }) {
           <input type="password" minLength="6" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="至少 6 位" required />
         </label>
         {error && <p className="error">{error}</p>}
-        <button className="primary" disabled={busy}>{busy ? '处理中...' : mode === 'signin' ? '进入记忆本' : '创建账号'}</button>
-        <p className="hint">接入 Supabase 后会使用真实账号；未配置时会自动进入本地预览模式。</p>
+        <button className="primary" disabled={busy}>{busy ? '处理中...' : mode === 'signin' ? '进入小本本' : '创建账号'}</button>
+        <p className="hint">只允许你们两个邮箱登录。未配置 Supabase 时会进入本地预览模式。</p>
       </form>
     </Shell>
   )
@@ -117,6 +143,7 @@ function AuthScreen({ onAuthed }) {
 
 function Notebook({ onLogout }) {
   const [items, setItems] = useState([])
+  const [activeSpace, setActiveSpace] = useState(defaultSpace)
   const [selectedCategory, setSelectedCategory] = useState('全部')
   const [selectedStatus, setSelectedStatus] = useState('全部')
   const [detailItem, setDetailItem] = useState(null)
@@ -140,18 +167,18 @@ function Notebook({ onLogout }) {
 
   useEffect(() => { refresh() }, [])
 
-  const filtered = useMemo(() => items.filter((item) => {
+  const activeSpaceInfo = getSpace(activeSpace)
+  const visibleItems = useMemo(() => items.filter((item) => (item.space || defaultSpace) === activeSpace), [items, activeSpace])
+  const filtered = useMemo(() => visibleItems.filter((item) => {
     const categoryOk = selectedCategory === '全部' || item.category === selectedCategory
     const statusOk = selectedStatus === '全部' || item.status === selectedStatus
     return categoryOk && statusOk
-  }), [items, selectedCategory, selectedStatus])
+  }), [visibleItems, selectedCategory, selectedStatus])
 
-  const stats = useMemo(() => ({
-    total: items.length,
-    done: items.filter((item) => item.status === '已完成').length,
-    pending: items.filter((item) => item.status === '待确认').length,
-    week: items.filter((item) => item.status === '本周行动').length,
-  }), [items])
+  const countsBySpace = useMemo(() => spaces.reduce((next, space) => {
+    next[space.value] = items.filter((item) => (item.space || defaultSpace) === space.value).length
+    return next
+  }, {}), [items])
 
   async function handleStatus(id, status) {
     await updateItem(id, { status })
@@ -174,7 +201,7 @@ function Notebook({ onLogout }) {
     <Shell>
       <header className="topbar">
         <div>
-          <div className="eyebrow">两个人的轻量记忆本</div>
+          <div className="eyebrow">两个人的小本本</div>
           <h1>{APP_NAME}</h1>
         </div>
         {hasSupabaseConfig && <button className="ghost" onClick={onLogout}>退出</button>}
@@ -185,23 +212,36 @@ function Notebook({ onLogout }) {
       )}
 
       <section className="hero">
-        <p>把“以后再说”的小事放到一个柔软但靠谱的地方。先记下来，之后一起决定要不要做、什么时候做。</p>
-        <button className="primary big" onClick={() => setShowNew(true)}>新增一条记录</button>
+        <p>把重要的小事放在这里，我们慢慢做，不靠猜，也不靠闹。</p>
       </section>
 
-      <section className="stats-grid">
-        <Stat label="总数" value={stats.total} />
-        <Stat label="已完成" value={stats.done} />
-        <Stat label="待确认" value={stats.pending} />
-        <Stat label="本周行动" value={stats.week} />
+      <section className="space-tabs" aria-label="记录区域">
+        {spaces.map((space) => (
+          <button
+            key={space.value}
+            type="button"
+            className={activeSpace === space.value ? 'active' : ''}
+            onClick={() => setActiveSpace(space.value)}
+          >
+            <span>{space.label}</span>
+            <strong>{countsBySpace[space.value] || 0}</strong>
+          </button>
+        ))}
+      </section>
+
+      <section className="space-intro">
+        <div>
+          <h2>{activeSpaceInfo.label}</h2>
+          <p>{activeSpaceInfo.description}</p>
+        </div>
       </section>
 
       <section className="filters">
-        <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)}>
+        <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)} aria-label="筛选分类">
           <option>全部</option>
           {categories.map((category) => <option key={category}>{category}</option>)}
         </select>
-        <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)}>
+        <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)} aria-label="筛选状态">
           <option>全部</option>
           {statuses.map((status) => <option key={status}>{status}</option>)}
         </select>
@@ -210,11 +250,11 @@ function Notebook({ onLogout }) {
       {error && <p className="error">{error}</p>}
       {loading ? <p className="muted">正在读取...</p> : (
         <section className="list">
-          {filtered.length === 0 && <EmptyState onAdd={() => setShowNew(true)} />}
+          {filtered.length === 0 && <EmptyState space={activeSpaceInfo} />}
           {filtered.map((item) => (
             <article className="item-card" key={item.id} onClick={() => setDetailItem(item)}>
               <div className="item-topline">
-                <span className="category">{item.category}</span>
+                <span className="category">{getSpace(item.space).label} · {item.category}</span>
                 <span className={statusClass(item.status)}>{item.status}</span>
               </div>
               <h2>{item.title}</h2>
@@ -228,37 +268,41 @@ function Notebook({ onLogout }) {
         </section>
       )}
 
-      <section className="weekly card">
-        <h2>本周关注</h2>
-        <p>把需要回应的事收在这里，避免它们散落在聊天记录里。</p>
-        <div className="mini-row">
-          <span>待确认和本周行动</span>
-          <strong>{stats.pending + stats.week} 条</strong>
-        </div>
-      </section>
+      <button className="floating-add" onClick={() => setShowNew(true)} aria-label="记一件事">+ 记一件事</button>
 
-      {showNew && <NewItemModal onClose={() => setShowNew(false)} onCreated={async () => { setShowNew(false); await refresh() }} />}
-      {detailItem && <DetailModal item={detailItem} onClose={() => setDetailItem(null)} onRefresh={refresh} onStatus={handleStatus} onSeen={handleSeen} onDelete={handleDelete} />}
+      {showNew && (
+        <NewItemModal
+          initialSpace={activeSpace}
+          onClose={() => setShowNew(false)}
+          onCreated={async () => { setShowNew(false); await refresh() }}
+        />
+      )}
+      {detailItem && (
+        <DetailModal
+          item={detailItem}
+          onClose={() => setDetailItem(null)}
+          onRefresh={refresh}
+          onStatus={handleStatus}
+          onSeen={handleSeen}
+          onDelete={handleDelete}
+        />
+      )}
     </Shell>
   )
 }
 
-function Stat({ label, value }) {
-  return <div className="stat"><strong>{value}</strong><span>{label}</span></div>
-}
-
-function EmptyState({ onAdd }) {
+function EmptyState({ space }) {
   return (
     <div className="empty card">
-      <h2>还没有记录</h2>
-      <p>先放进一条想法，哪怕它还很小。</p>
-      <button className="secondary" onClick={onAdd}>新增记录</button>
+      <h2>{space.label}还没有记录</h2>
+      <p>先放进一件小事。它不用立刻被解决，只要先被好好记住。</p>
     </div>
   )
 }
 
-function NewItemModal({ onClose, onCreated }) {
+function NewItemModal({ initialSpace, onClose, onCreated }) {
   const [title, setTitle] = useState('')
+  const [space, setSpace] = useState(initialSpace || defaultSpace)
   const [category, setCategory] = useState(categories[0])
   const [status, setStatus] = useState(statuses[0])
   const [note, setNote] = useState('')
@@ -270,7 +314,7 @@ function NewItemModal({ onClose, onCreated }) {
     setBusy(true)
     setError('')
     try {
-      await addItem({ title, category, status, note })
+      await addItem({ title, space, category, status, note })
       onCreated()
     } catch (err) {
       setError(err.message || '新增失败')
@@ -280,12 +324,18 @@ function NewItemModal({ onClose, onCreated }) {
   }
 
   return (
-    <Modal title="新增记录" onClose={onClose}>
+    <Modal title="记一件事" onClose={onClose}>
       <form className="form" onSubmit={submit}>
+        <label>
+          归属区域
+          <select value={space} onChange={(e) => setSpace(e.target.value)}>
+            {spaces.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          </select>
+        </label>
         <label>标题<input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="比如：周末去植物园" required /></label>
         <label>分类<select value={category} onChange={(e) => setCategory(e.target.value)}>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
         <label>状态<select value={status} onChange={(e) => setStatus(e.target.value)}>{statuses.map((item) => <option key={item}>{item}</option>)}</select></label>
-        <label>备注<textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="补充时间、原因、链接或任何想记住的细节" rows="4" /></label>
+        <label>备注<textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="补充时间、原因、链接，或者只是当时想记住的一句话" rows="4" /></label>
         {error && <p className="error">{error}</p>}
         <button className="primary" disabled={busy}>{busy ? '保存中...' : '保存'}</button>
       </form>
@@ -317,7 +367,7 @@ function DetailModal({ item, onClose, onRefresh, onStatus, onSeen, onDelete }) {
     <Modal title={item.title} onClose={onClose}>
       <div className="detail">
         <div className="item-topline">
-          <span className="category">{item.category}</span>
+          <span className="category">{getSpace(item.space).label} · {item.category}</span>
           <span className={statusClass(item.status)}>{item.status}</span>
         </div>
         {item.note && <p className="detail-note">{item.note}</p>}

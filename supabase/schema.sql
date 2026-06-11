@@ -1,13 +1,14 @@
 -- Run this file in Supabase Dashboard > SQL Editor.
--- Before running it, replace the two emails in public.is_couple_member().
+-- Existing projects can run the migration block below safely.
 
 create extension if not exists pgcrypto;
 
 create table if not exists public.items (
   id uuid primary key default gen_random_uuid(),
   title text not null,
+  space text not null default 'shared' check (space in ('mine', 'hers', 'shared')),
   category text not null check (category in ('想一起做', '重要日子', '礼物灵感', '需要聊聊', '生活待办')),
-  status text not null default '新想法' check (status in ('新想法', '待确认', '本周行动', '已完成', '先搁置')),
+  status text not null default '已记下' check (status in ('已记下', '待确认', '这周处理', '已完成', '暂时做不到')),
   note text,
   created_by uuid references auth.users(id) on delete set null,
   updated_by uuid references auth.users(id) on delete set null,
@@ -17,6 +18,50 @@ create table if not exists public.items (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.items
+  add column if not exists space text not null default 'shared';
+
+-- Migration for an existing items table.
+update public.items
+set status = case status
+  when '新想法' then '已记下'
+  when '本周行动' then '这周处理'
+  when '先搁置' then '暂时做不到'
+  else status
+end
+where status in ('新想法', '本周行动', '先搁置');
+
+do $$
+declare
+  constraint_name text;
+begin
+  for constraint_name in
+    select conname
+    from pg_constraint
+    where conrelid = 'public.items'::regclass
+      and contype = 'c'
+      and pg_get_constraintdef(oid) like '%status%'
+  loop
+    execute format('alter table public.items drop constraint %I', constraint_name);
+  end loop;
+
+  for constraint_name in
+    select conname
+    from pg_constraint
+    where conrelid = 'public.items'::regclass
+      and contype = 'c'
+      and pg_get_constraintdef(oid) like '%space%'
+  loop
+    execute format('alter table public.items drop constraint %I', constraint_name);
+  end loop;
+end $$;
+
+alter table public.items
+  add constraint items_status_check check (status in ('已记下', '待确认', '这周处理', '已完成', '暂时做不到'));
+
+alter table public.items
+  add constraint items_space_check check (space in ('mine', 'hers', 'shared'));
 
 create table if not exists public.comments (
   id uuid primary key default gen_random_uuid(),
@@ -92,4 +137,5 @@ create policy "couple can delete comments"
   using (public.is_couple_member());
 
 create index if not exists idx_items_updated_at on public.items(updated_at desc);
+create index if not exists idx_items_space on public.items(space);
 create index if not exists idx_comments_item_id on public.comments(item_id);

@@ -4,11 +4,13 @@ export { hasSupabaseConfig } from './supabaseClient'
 const STORAGE_KEY = 'remember-you-local-v1'
 const COMMENT_KEY = 'remember-you-comments-v1'
 const DONE_STATUS = '已完成'
+const DEFAULT_SPACE = 'shared'
 
 const seedItems = [
   {
     id: crypto.randomUUID(),
     title: '周末去植物园',
+    space: 'shared',
     category: '想一起做',
     status: '待确认',
     note: '找一个天气好的下午，慢慢逛，不赶时间。',
@@ -21,9 +23,10 @@ const seedItems = [
   {
     id: crypto.randomUUID(),
     title: '准备一个小惊喜',
+    space: 'mine',
     category: '礼物灵感',
-    status: '新想法',
-    note: '可以先收集对方最近提到过的小东西。',
+    status: '已记下',
+    note: '先收集她最近随口提到过的小东西。',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     completed_at: null,
@@ -31,6 +34,10 @@ const seedItems = [
     created_by: 'local',
   },
 ]
+
+function normalizeItem(item) {
+  return { ...item, space: item.space || DEFAULT_SPACE }
+}
 
 function readLocal(key, fallback) {
   try {
@@ -48,7 +55,7 @@ function writeLocal(key, value) {
 
 function localItems() {
   const existing = readLocal(STORAGE_KEY, null)
-  if (existing) return existing
+  if (existing) return existing.map(normalizeItem)
   writeLocal(STORAGE_KEY, seedItems)
   return seedItems
 }
@@ -106,21 +113,22 @@ export async function listItems() {
     .select('*')
     .order('updated_at', { ascending: false })
   if (error) throw error
-  return data || []
+  return (data || []).map(normalizeItem)
 }
 
 export async function addItem(item) {
   const now = new Date().toISOString()
+  const nextItem = { ...item, space: item.space || DEFAULT_SPACE }
   if (!hasSupabaseConfig) {
-    const next = [{ ...item, id: crypto.randomUUID(), created_at: now, updated_at: now, created_by: 'local', completed_at: null, seen_at: null }, ...localItems()]
+    const next = [{ ...nextItem, id: crypto.randomUUID(), created_at: now, updated_at: now, created_by: 'local', completed_at: null, seen_at: null }, ...localItems()]
     writeLocal(STORAGE_KEY, next)
     return next[0]
   }
   const user = await getCurrentUser()
-  const payload = { ...item, created_by: user.id, updated_by: user.id }
+  const payload = { ...nextItem, created_by: user.id, updated_by: user.id }
   const { data, error } = await supabase.from('items').insert(payload).select('*').single()
   if (error) throw error
-  return data
+  return normalizeItem(data)
 }
 
 export async function updateItem(id, patch) {
@@ -130,7 +138,7 @@ export async function updateItem(id, patch) {
   if (patch.status && patch.status !== DONE_STATUS) nextPatch.completed_at = null
 
   if (!hasSupabaseConfig) {
-    const next = localItems().map((item) => item.id === id ? { ...item, ...nextPatch } : item)
+    const next = localItems().map((item) => item.id === id ? normalizeItem({ ...item, ...nextPatch }) : item)
     writeLocal(STORAGE_KEY, next)
     return next.find((item) => item.id === id)
   }
@@ -142,7 +150,7 @@ export async function updateItem(id, patch) {
     .select('*')
     .single()
   if (error) throw error
-  return data
+  return normalizeItem(data)
 }
 
 export async function deleteItem(id) {

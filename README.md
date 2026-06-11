@@ -34,6 +34,10 @@ VITE_SUPABASE_ANON_KEY=你的 anon public key
 
 6. 重新启动开发服务器。
 
+## 已有项目升级
+
+如果项目已经部署过，这次三分区版本需要在 Supabase SQL Editor 里重新执行 `supabase/schema.sql` 中的 migration 部分。它会给 `items` 表增加 `space` 字段，并把旧状态平滑映射到新的状态文案。
+
 ## 构建部署
 
 ```bash

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'remember-you-cache-v2';
+const CACHE_NAME = 'remember-you-cache-v3';
 const ASSETS = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (event) => {
