@@ -1,0 +1,17 @@
+{
+  "name": "Remember You",
+  "short_name": "Remember",
+  "description": "A private shared memory notebook for two people.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fffaf7",
+  "theme_color": "#fff3ee",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
