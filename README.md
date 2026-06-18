@@ -38,6 +38,16 @@ VITE_SUPABASE_ANON_KEY=你的 anon public key
 
 如果项目已经部署过，这次三分区版本需要在 Supabase SQL Editor 里重新执行 `supabase/schema.sql` 中的 migration 部分。它会给 `items` 表增加 `space` 字段，并把旧状态平滑映射到新的状态文案。
 
+## 图片附件迁移
+
+图片附件使用私有 Supabase Storage bucket，不会把图片 Base64 写入数据库。部署带图片功能的前端之前，先在 Supabase SQL Editor 执行：
+
+```text
+supabase/migrations/20260618_private_image_attachments.sql
+```
+
+它会创建 `remember-images` 私有 bucket、`item_attachments` 表，以及对应的 Storage 和表级 RLS。
+
 ## 构建部署
 
 ```bash

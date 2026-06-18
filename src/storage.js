@@ -3,8 +3,11 @@ export { hasSupabaseConfig } from './supabaseClient'
 
 const STORAGE_KEY = 'remember-you-local-v1'
 const COMMENT_KEY = 'remember-you-comments-v1'
+const ATTACHMENT_KEY = 'remember-you-attachments-v1'
+const IMAGE_BUCKET = 'remember-images'
 const DONE_STATUS = '已完成'
 const DEFAULT_SPACE = 'shared'
+const MAX_ATTACHMENTS = 3
 
 const seedItems = [
   {
@@ -62,6 +65,10 @@ function localItems() {
 
 function localComments() {
   return readLocal(COMMENT_KEY, [])
+}
+
+function localAttachments() {
+  return readLocal(ATTACHMENT_KEY, [])
 }
 
 export async function getCurrentUser() {
@@ -157,8 +164,17 @@ export async function deleteItem(id) {
   if (!hasSupabaseConfig) {
     writeLocal(STORAGE_KEY, localItems().filter((item) => item.id !== id))
     writeLocal(COMMENT_KEY, localComments().filter((comment) => comment.item_id !== id))
+    writeLocal(ATTACHMENT_KEY, localAttachments().filter((attachment) => attachment.item_id !== id))
     return
   }
+
+  const attachments = await listAttachments(id)
+  const paths = attachments.map((attachment) => attachment.path)
+  if (paths.length > 0) {
+    const { error: removeError } = await supabase.storage.from(IMAGE_BUCKET).remove(paths)
+    if (removeError) throw removeError
+  }
+
   const { error } = await supabase.from('items').delete().eq('id', id)
   if (error) throw error
 }
@@ -198,4 +214,104 @@ export async function addComment(itemId, content) {
   if (error) throw error
   await updateItem(itemId, { updated_at: now })
   return data
+}
+
+export async function listAttachments(itemId) {
+  if (!hasSupabaseConfig) {
+    return localAttachments().filter((attachment) => attachment.item_id === itemId)
+  }
+
+  const { data, error } = await supabase
+    .from('item_attachments')
+    .select('*')
+    .eq('item_id', itemId)
+    .order('created_at', { ascending: true })
+  if (error) throw error
+
+  const withUrls = await Promise.all((data || []).map(async (attachment) => {
+    const { data: signed, error: signedError } = await supabase.storage
+      .from(IMAGE_BUCKET)
+      .createSignedUrl(attachment.path, 60 * 10)
+    if (signedError) return { ...attachment, signedUrl: '', signedError: signedError.message }
+    return { ...attachment, signedUrl: signed.signedUrl }
+  }))
+
+  return withUrls
+}
+
+export async function uploadAttachment(itemId, image) {
+  if (!hasSupabaseConfig) {
+    const current = localAttachments().filter((attachment) => attachment.item_id === itemId)
+    if (current.length >= MAX_ATTACHMENTS) throw new Error('一条记录最多只能放 3 张图片。')
+    const attachment = {
+      id: crypto.randomUUID(),
+      item_id: itemId,
+      bucket: 'local',
+      path: image.previewUrl,
+      file_name: image.file.name,
+      mime_type: image.blob.type,
+      size_bytes: image.blob.size,
+      width: image.width,
+      height: image.height,
+      signedUrl: image.previewUrl,
+      created_at: new Date().toISOString(),
+    }
+    writeLocal(ATTACHMENT_KEY, [...localAttachments(), attachment])
+    return attachment
+  }
+
+  const current = await listAttachments(itemId)
+  if (current.length >= MAX_ATTACHMENTS) throw new Error('一条记录最多只能放 3 张图片。')
+
+  const user = await getCurrentUser()
+  const extension = image.blob.type === 'image/png' ? 'png' : image.blob.type === 'image/jpeg' ? 'jpg' : 'webp'
+  const path = `${user.id}/${itemId}/${crypto.randomUUID()}.${extension}`
+
+  const { error: uploadError } = await supabase.storage
+    .from(IMAGE_BUCKET)
+    .upload(path, image.blob, {
+      contentType: image.blob.type,
+      cacheControl: '3600',
+      upsert: false,
+    })
+  if (uploadError) throw uploadError
+
+  const payload = {
+    item_id: itemId,
+    bucket: IMAGE_BUCKET,
+    path,
+    file_name: image.file.name,
+    mime_type: image.blob.type,
+    size_bytes: image.blob.size,
+    width: image.width,
+    height: image.height,
+    created_by: user.id,
+  }
+
+  const { data, error } = await supabase
+    .from('item_attachments')
+    .insert(payload)
+    .select('*')
+    .single()
+
+  if (error) {
+    await supabase.storage.from(IMAGE_BUCKET).remove([path])
+    throw error
+  }
+
+  await updateItem(itemId, { updated_at: new Date().toISOString() })
+  return data
+}
+
+export async function deleteAttachment(attachment) {
+  if (!hasSupabaseConfig) {
+    writeLocal(ATTACHMENT_KEY, localAttachments().filter((item) => item.id !== attachment.id))
+    return
+  }
+
+  const { error: removeError } = await supabase.storage.from(IMAGE_BUCKET).remove([attachment.path])
+  if (removeError) throw removeError
+
+  const { error } = await supabase.from('item_attachments').delete().eq('id', attachment.id)
+  if (error) throw error
 }
